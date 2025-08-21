@@ -28,33 +28,42 @@ from typing import List, Tuple
 
 
 def parse_asreq_packets(pcap_file: str) -> List[Tuple[str, str, str]]:
-    tshark_cmd = [
+    # Extract AS-REQ values (username, original realm, cipher)
+    asreq_cmd = [
         "tshark",
-        "-r",
-        pcap_file,
-        "-Y",
-        "kerberos.msg_type == 10 && kerberos.CNameString && kerberos.realm && kerberos.cipher",
-        "-T",
-        "fields",
-        "-e",
-        "kerberos.CNameString",
-        "-e",
-        "kerberos.realm",
-        "-e",
-        "kerberos.cipher",
-        "-E",
-        "separator=$",
+        "-r", pcap_file,
+        "-Y", "kerberos.msg_type == 10 && kerberos.CNameString && kerberos.realm && kerberos.cipher",
+        "-T", "fields",
+        "-e", "kerberos.CNameString",
+        "-e", "kerberos.realm",
+        "-e", "kerberos.cipher",
+        "-E", "separator=$",
     ]
+    asreq_result = subprocess.run(asreq_cmd, capture_output=True, text=True, check=True)
 
-    result = subprocess.run(tshark_cmd, capture_output=True, text=True, check=True)
+    # Extract AS-REP realm values
+    asrep_cmd = [
+        "tshark",
+        "-r", pcap_file,
+        "-Y", "kerberos.msg_type == 11 && kerberos.crealm",
+        "-T", "fields",
+        "-e", "kerberos.realm",
+    ]
+    asrep_result = subprocess.run(asrep_cmd, capture_output=True, text=True, check=True)
+
+    # Split outputs
+    asreq_lines = [l for l in asreq_result.stdout.strip().split("\n") if l]
+    asrep_realms = [l.strip() for l in asrep_result.stdout.strip().split("\n") if l]
 
     parsed_results = []
-    for line in result.stdout.strip().split("\n"):
-        if line:
-            username, domain, cipher = line.split("$")
-            parsed_results.append((username, domain, cipher))
+    for i, line in enumerate(asreq_lines):
+        username, _old_realm, cipher = line.split("$")
+        # Replace realm with value from AS-REP if available
+        new_realm = asrep_realms[i] if i < len(asrep_realms) else _old_realm
+        parsed_results.append((username, new_realm, cipher))
 
     return parsed_results
+
 
 
 def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
