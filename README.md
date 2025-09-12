@@ -115,7 +115,7 @@ hashcat -m 18200 <hashfile> <wordlist>
 
 ### Cracking TGS-REP Hashes
 
-For TGS-REP hashes, use Hashcat mode `18200`:
+For TGS-REP hashes, use Hashcat mode `13100`:
 
 ```bash
 hashcat -m 13100 <hashfile> <wordlist>
