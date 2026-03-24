@@ -1,7 +1,7 @@
 """
 MIT License
 
-Copyright (c) 2024 Javier Álvarez
+Copyright (c) 2026 Javier Álvarez
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -24,55 +24,37 @@ SOFTWARE.
 
 import sys
 import subprocess
+import functools
 from typing import List, Tuple
 
 
+@functools.lru_cache(maxsize=1)
+def _use_legacy_cipher_field() -> bool:
+    """Check if tshark uses the legacy generic 'kerberos.cipher' field.
+
+    Wireshark 4.6.0+ replaced the generic 'kerberos.cipher' with context-specific
+    field names (e.g. 'kerberos.pA_ENC_TIMESTAMP_cipher',
+    'kerberos.encryptedTicketData_cipher', 'kerberos.encryptedKDCREPData_cipher').
+    The old generic field still exists in the field registry but no longer gets
+    populated during packet dissection, causing empty output.
+    """
+    try:
+        result = subprocess.run(["tshark", "-G", "fields"], capture_output=True, text=True, check=True)
+        return "kerberos.pA_ENC_TIMESTAMP_cipher" not in result.stdout
+    except subprocess.CalledProcessError:
+        return True  # Assume legacy on error
+
+
 def parse_asreq_packets(pcap_file: str) -> List[Tuple[str, str, str]]:
-    # Extract AS-REQ values (username, original realm, cipher)
+    legacy = _use_legacy_cipher_field()
+    cipher_field = "kerberos.cipher" if legacy else "kerberos.pA_ENC_TIMESTAMP_cipher"
+
     asreq_cmd = [
-        "tshark",
-        "-r", pcap_file,
-        "-Y", "kerberos.msg_type == 10 && kerberos.CNameString && kerberos.realm && kerberos.cipher",
-        "-T", "fields",
-        "-e", "kerberos.CNameString",
-        "-e", "kerberos.realm",
-        "-e", "kerberos.cipher",
-        "-E", "separator=$",
-    ]
-    asreq_result = subprocess.run(asreq_cmd, capture_output=True, text=True, check=True)
-
-    # Extract AS-REP realm values
-    asrep_cmd = [
-        "tshark",
-        "-r", pcap_file,
-        "-Y", "kerberos.msg_type == 11 && kerberos.crealm",
-        "-T", "fields",
-        "-e", "kerberos.realm",
-    ]
-    asrep_result = subprocess.run(asrep_cmd, capture_output=True, text=True, check=True)
-
-    # Split outputs
-    asreq_lines = [l for l in asreq_result.stdout.strip().split("\n") if l]
-    asrep_realms = [l.strip() for l in asrep_result.stdout.strip().split("\n") if l]
-
-    parsed_results = []
-    for i, line in enumerate(asreq_lines):
-        username, _old_realm, cipher = line.split("$")
-        # Replace realm with value from AS-REP if available
-        new_realm = asrep_realms[i] if i < len(asrep_realms) else _old_realm
-        parsed_results.append((username, new_realm, cipher))
-
-    return parsed_results
-
-
-
-def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
-    tshark_cmd = [
         "tshark",
         "-r",
         pcap_file,
         "-Y",
-        "kerberos.msg_type == 11 && kerberos.CNameString && kerberos.realm && kerberos.cipher",
+        f"kerberos.msg_type == 10 && kerberos.CNameString && kerberos.realm && {cipher_field}",
         "-T",
         "fields",
         "-e",
@@ -80,9 +62,56 @@ def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
         "-e",
         "kerberos.realm",
         "-e",
-        "kerberos.cipher",
-        "-E",
-        "separator=$",
+        cipher_field,
+    ]
+    asreq_result = subprocess.run(asreq_cmd, capture_output=True, text=True, check=True)
+
+    asrep_cmd = [
+        "tshark",
+        "-r",
+        pcap_file,
+        "-Y",
+        "kerberos.msg_type == 11 && kerberos.crealm",
+        "-T",
+        "fields",
+        "-e",
+        "kerberos.realm",
+    ]
+    asrep_result = subprocess.run(asrep_cmd, capture_output=True, text=True, check=True)
+
+    asreq_lines = [l for l in asreq_result.stdout.strip().split("\n") if l]
+    asrep_realms = [l.strip() for l in asrep_result.stdout.strip().split("\n") if l]
+
+    parsed_results = []
+    for i, line in enumerate(asreq_lines):
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        username, _old_realm, cipher = parts
+        new_realm = asrep_realms[i] if i < len(asrep_realms) else _old_realm
+        parsed_results.append((username, new_realm, cipher))
+
+    return parsed_results
+
+
+def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
+    legacy = _use_legacy_cipher_field()
+    cipher_field = "kerberos.cipher" if legacy else "kerberos.encryptedKDCREPData_cipher"
+
+    tshark_cmd = [
+        "tshark",
+        "-r",
+        pcap_file,
+        "-Y",
+        f"kerberos.msg_type == 11 && kerberos.CNameString && kerberos.realm && {cipher_field}",
+        "-T",
+        "fields",
+        "-e",
+        "kerberos.CNameString",
+        "-e",
+        "kerberos.realm",
+        "-e",
+        cipher_field,
     ]
 
     result = subprocess.run(tshark_cmd, capture_output=True, text=True, check=True)
@@ -91,13 +120,21 @@ def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
     for line in result.stdout.strip().split("\n"):
         if line:
             try:
-                username, domain, cipher = line.split("$")
-                cipher_parts = cipher.split(",")  # AS-REP packets contain two ciphers: one for the ticket and one for the session key
-                if len(cipher_parts) > 1:
-                    session_key_cipher = cipher_parts[1]
-                    ticket_checksum = session_key_cipher[:32]  # 32 hex chars = 16 bytes
-                    ticket_enc_data = session_key_cipher[32:]
-                    parsed_results.append((username, domain, ticket_checksum, ticket_enc_data))
+                parts = line.split("\t")
+                if len(parts) != 3:
+                    continue
+                username, domain, cipher = parts
+                if legacy:
+                    cipher_parts = cipher.split(",")
+                    if len(cipher_parts) > 1:
+                        session_key_cipher = cipher_parts[1]
+                    else:
+                        continue
+                else:
+                    session_key_cipher = cipher
+                ticket_checksum = session_key_cipher[:32]
+                ticket_enc_data = session_key_cipher[32:]
+                parsed_results.append((username, domain, ticket_checksum, ticket_enc_data))
             except:
                 continue
 
@@ -105,12 +142,15 @@ def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
 
 
 def parse_tgsrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str, str]]:
+    legacy = _use_legacy_cipher_field()
+    cipher_field = "kerberos.cipher" if legacy else "kerberos.encryptedTicketData_cipher"
+
     tshark_cmd = [
         "tshark",
         "-r",
         pcap_file,
         "-Y",
-        "kerberos.msg_type == 13 && kerberos.CNameString && kerberos.realm && kerberos.SNameString && kerberos.cipher",
+        f"kerberos.msg_type == 13 && kerberos.CNameString && kerberos.realm && kerberos.SNameString && {cipher_field}",
         "-T",
         "fields",
         "-e",
@@ -120,9 +160,7 @@ def parse_tgsrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str, str]]
         "-e",
         "kerberos.SNameString",
         "-e",
-        "kerberos.cipher",
-        "-E",
-        "separator=$",
+        cipher_field,
     ]
 
     result = subprocess.run(tshark_cmd, capture_output=True, text=True, check=True)
@@ -130,15 +168,26 @@ def parse_tgsrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str, str]]
     for line in result.stdout.strip().split("\n"):
         if line:
             try:
-                username, domain, spn, cipher = line.split("$")
+                parts = line.split("\t")
+                if len(parts) != 4:
+                    continue
+                username, domain, spn, cipher = parts
                 spn_parts = spn.split(",")
-                cipher_parts = cipher.split(",")  # TGS-REP packets contain two ciphers: one for the ticket and one for the session key
-                if len(spn_parts) > 1 and len(cipher_parts) > 1:
+                if legacy:
+                    cipher_parts = cipher.split(",")
+                    if len(spn_parts) > 1 and len(cipher_parts) > 1:
+                        spn = spn.replace(",", "/")
+                        ticket_cipher = cipher_parts[0]
+                    else:
+                        continue
+                else:
+                    if len(spn_parts) <= 1:
+                        continue
                     spn = spn.replace(",", "/")
-                    ticket_cipher = cipher_parts[0]
-                    ticket_checksum = ticket_cipher[:32]  # 32 hex chars = 16 bytes
-                    ticket_enc_data = ticket_cipher[32:]
-                    parsed_results.append((username, domain, spn, ticket_checksum, ticket_enc_data))
+                    ticket_cipher = cipher
+                ticket_checksum = ticket_cipher[:32]
+                ticket_enc_data = ticket_cipher[32:]
+                parsed_results.append((username, domain, spn, ticket_checksum, ticket_enc_data))
             except:
                 continue
 
