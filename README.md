@@ -13,6 +13,8 @@
 
 **Krb5RoastParser** is a tool designed to parse Kerberos authentication packets (AS-REQ, AS-REP and TGS-REP) from `.pcap` files and generate password-cracking-compatible hashes for security testing. By leveraging `tshark`, Krb5RoastParser extracts necessary details from Kerberos packets, providing hash formats ready for tools like Hashcat.
 
+![Demo](demo.gif)
+
 ## ⭐ Features
 
 - Parse AS-REQ, AS-REP and TGS-REP packets from `.pcap` files.
