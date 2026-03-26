@@ -1,5 +1,7 @@
 # Krb5RoastParser
 
+[![Star History Chart](https://api.star-history.com/image?repos=jalvarezz13/krb5roastparser&type=date&legend=top-left)](https://www.star-history.com/?repos=jalvarezz13%2Fkrb5roastparser&type=date&legend=top-left)
+
 ## 📑 Table of Contents
 
 - [❓ What is Krb5RoastParser?](#-what-is-krb5roastparser)
