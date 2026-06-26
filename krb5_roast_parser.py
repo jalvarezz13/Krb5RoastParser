@@ -23,9 +23,40 @@ SOFTWARE.
 """
 
 import sys
+import shutil
 import subprocess
 import functools
 from typing import List, Tuple
+
+
+@functools.lru_cache(maxsize=1)
+def _tshark_path() -> str:
+    """Resolve the absolute path to the tshark executable once.
+
+    Resolving via shutil.which avoids relying on PATH lookup at call time and
+    produces a clear error instead of a raw FileNotFoundError traceback when
+    tshark is missing.
+    """
+    path = shutil.which("tshark")
+    if path is None:
+        print(
+            "Error: 'tshark' was not found in PATH. Install Wireshark/tshark "
+            "and ensure it is accessible.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return path
+
+
+def _clean(value: str) -> str:
+    """Strip control characters that could corrupt a single output record.
+
+    Tab and newline are field/record separators in tshark '-T fields' output,
+    so they can never legitimately appear inside a captured field. Removing
+    them defensively keeps the emitted hash on a single, well-formed line
+    without altering legitimate values (including machine-account names that
+    end in '$')."""
+    return value.replace("\n", "").replace("\r", "").replace("\t", "")
 
 
 @functools.lru_cache(maxsize=1)
@@ -39,7 +70,7 @@ def _use_legacy_cipher_field() -> bool:
     populated during packet dissection, causing empty output.
     """
     try:
-        result = subprocess.run(["tshark", "-G", "fields"], capture_output=True, text=True, check=True)
+        result = subprocess.run([_tshark_path(), "-G", "fields"], capture_output=True, text=True, check=True)
         return "kerberos.pA_ENC_TIMESTAMP_cipher" not in result.stdout
     except subprocess.CalledProcessError:
         return True  # Assume legacy on error
@@ -50,7 +81,7 @@ def parse_asreq_packets(pcap_file: str) -> List[Tuple[str, str, str]]:
     cipher_field = "kerberos.cipher" if legacy else "kerberos.pA_ENC_TIMESTAMP_cipher"
 
     asreq_cmd = [
-        "tshark",
+        _tshark_path(),
         "-r",
         pcap_file,
         "-Y",
@@ -67,7 +98,7 @@ def parse_asreq_packets(pcap_file: str) -> List[Tuple[str, str, str]]:
     asreq_result = subprocess.run(asreq_cmd, capture_output=True, text=True, check=True)
 
     asrep_cmd = [
-        "tshark",
+        _tshark_path(),
         "-r",
         pcap_file,
         "-Y",
@@ -99,7 +130,7 @@ def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
     cipher_field = "kerberos.cipher" if legacy else "kerberos.encryptedKDCREPData_cipher"
 
     tshark_cmd = [
-        "tshark",
+        _tshark_path(),
         "-r",
         pcap_file,
         "-Y",
@@ -135,7 +166,7 @@ def parse_asrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str]]:
                 ticket_checksum = session_key_cipher[:32]
                 ticket_enc_data = session_key_cipher[32:]
                 parsed_results.append((username, domain, ticket_checksum, ticket_enc_data))
-            except:
+            except (ValueError, IndexError):
                 continue
 
     return parsed_results
@@ -146,7 +177,7 @@ def parse_tgsrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str, str]]
     cipher_field = "kerberos.cipher" if legacy else "kerberos.encryptedTicketData_cipher"
 
     tshark_cmd = [
-        "tshark",
+        _tshark_path(),
         "-r",
         pcap_file,
         "-Y",
@@ -188,7 +219,7 @@ def parse_tgsrep_packets(pcap_file: str) -> List[Tuple[str, str, str, str, str]]
                 ticket_checksum = ticket_cipher[:32]
                 ticket_enc_data = ticket_cipher[32:]
                 parsed_results.append((username, domain, spn, ticket_checksum, ticket_enc_data))
-            except:
+            except (ValueError, IndexError):
                 continue
 
     return parsed_results
@@ -205,17 +236,17 @@ def main():
     if roast_type == "as_req":
         fields = parse_asreq_packets(pcap_file)
         for username, domain, cipher in fields:
-            print(f"$krb5pa$18${username}${domain}${cipher}")
+            print(f"$krb5pa$18${_clean(username)}${_clean(domain)}${cipher}")
 
     elif roast_type == "as_rep":
         fields = parse_asrep_packets(pcap_file)
         for username, domain, ticket_checksum, ticket_enc_data in fields:
-            print(f"$krb5asrep$23${username}@{domain}:{ticket_checksum}${ticket_enc_data}")
+            print(f"$krb5asrep$23${_clean(username)}@{_clean(domain)}:{ticket_checksum}${ticket_enc_data}")
 
     elif roast_type == "tgs_rep":
         fields = parse_tgsrep_packets(pcap_file)
         for username, domain, spn, ticket_checksum, ticket_enc_data in fields:
-            print(f"$krb5tgs$23$*{username}${domain}${spn}*${ticket_checksum}${ticket_enc_data}")
+            print(f"$krb5tgs$23$*{_clean(username)}${_clean(domain)}${_clean(spn)}*${ticket_checksum}${ticket_enc_data}")
 
     else:
         print("Error: Second argument must be either 'as_req', 'as_rep' or 'tgs_rep'", file=sys.stderr)
