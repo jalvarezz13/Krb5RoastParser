@@ -1,6 +1,12 @@
 # Krb5RoastParser
 
-[![Star History Chart](https://api.star-history.com/image?repos=jalvarezz13/krb5roastparser&type=date&legend=top-left)](https://www.star-history.com/?repos=jalvarezz13%2Fkrb5roastparser&type=date&legend=top-left)
+<a href="https://www.star-history.com/?repos=jalvarezz13%2Fkrb5roastparser&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=jalvarezz13/krb5roastparser&type=date&theme=dark&legend=top-left&sealed_token=HPmoU6MNaUuDBjtj_Sb06Z9njUbg0nBH_25noThCniXqa7MxS5PqfmOJNxKyLR4cZ0Y1GjijrGScarwmpaPztv3fgyvzeenQnnzPKEO6NFK_F6NNSWSJHWHI2aNQ8qoijSiCoKklxKRAgtced5__qLGb6t12Zif72q-nKi9_Wxy96M16Dspf_nfYN3Y_" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=jalvarezz13/krb5roastparser&type=date&legend=top-left&sealed_token=HPmoU6MNaUuDBjtj_Sb06Z9njUbg0nBH_25noThCniXqa7MxS5PqfmOJNxKyLR4cZ0Y1GjijrGScarwmpaPztv3fgyvzeenQnnzPKEO6NFK_F6NNSWSJHWHI2aNQ8qoijSiCoKklxKRAgtced5__qLGb6t12Zif72q-nKi9_Wxy96M16Dspf_nfYN3Y_" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=jalvarezz13/krb5roastparser&type=date&legend=top-left&sealed_token=HPmoU6MNaUuDBjtj_Sb06Z9njUbg0nBH_25noThCniXqa7MxS5PqfmOJNxKyLR4cZ0Y1GjijrGScarwmpaPztv3fgyvzeenQnnzPKEO6NFK_F6NNSWSJHWHI2aNQ8qoijSiCoKklxKRAgtced5__qLGb6t12Zif72q-nKi9_Wxy96M16Dspf_nfYN3Y_" />
+ </picture>
+</a>
 
 ## 📑 Table of Contents
 
